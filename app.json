@@ -1,15 +1,44 @@
 {
   "expo": {
-    "name": "fishjam-demo",
+    "name": "Fishjam Camera",
     "slug": "fishjam-demo",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
-    "userInterfaceStyle": "light",
+    "userInterfaceStyle": "dark",
+    "scheme": "fishjam-camera",
+    "plugins": [
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "minSdkVersion": 26
+          },
+          "ios": {
+            "enableSceneSupport": true
+          }
+        }
+      ],
+      "expo-router",
+      "expo-font",
+      "expo-asset"
+    ],
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.jtatar.fishjamcamera",
+      "infoPlist": {
+        "NSCameraUsageDescription": "Use the camera to preview and stream video with zoom and torch controls.",
+        "NSMicrophoneUsageDescription": "Include your voice when you enable the microphone."
+      }
     },
     "android": {
+      "package": "com.jtatar.fishjamcamera",
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.MODIFY_AUDIO_SETTINGS",
+        "android.permission.ACCESS_NETWORK_STATE"
+      ],
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/android-icon-foreground.png",

@@ -32,6 +32,12 @@ yarn-error.*
 
 # local env files
 .env*.local
+.env
+artifacts/
+
+# local tooling and original demo recordings
+.claude/
+/camera-demo.mov
 
 # typescript
 *.tsbuildinfo
