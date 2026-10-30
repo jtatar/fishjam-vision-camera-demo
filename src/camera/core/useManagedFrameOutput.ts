@@ -16,13 +16,18 @@ const DEFAULT_RESOLUTION = { width: 1280, height: 720 };
 
 type ManagedFrameOutputOptions = Pick<
   UseFrameOutputProps,
-  'targetResolution' | 'pixelFormat' | 'dropFramesWhileBusy' | 'onFrame'
+  | 'targetResolution'
+  | 'pixelFormat'
+  | 'dropFramesWhileBusy'
+  | 'enablePhysicalBufferRotation'
+  | 'onFrame'
 >;
 
 export function useManagedFrameOutput({
   targetResolution = DEFAULT_RESOLUTION,
   pixelFormat = 'native',
   dropFramesWhileBusy = true,
+  enablePhysicalBufferRotation = false,
   onFrame,
 }: ManagedFrameOutputOptions) {
   const { width, height } = targetResolution;
@@ -33,11 +38,11 @@ export function useManagedFrameOutput({
         pixelFormat,
         dropFramesWhileBusy,
         enableCameraMatrixDelivery: false,
-        enablePhysicalBufferRotation: false,
+        enablePhysicalBufferRotation,
         enablePreviewSizedOutputBuffers: false,
         allowDeferredStart: true,
       }),
-    [width, height, pixelFormat, dropFramesWhileBusy],
+    [width, height, pixelFormat, dropFramesWhileBusy, enablePhysicalBufferRotation],
   );
   const runtime = useMemo(() => provider.createRuntimeForThread(frameOutput.thread), [frameOutput]);
 

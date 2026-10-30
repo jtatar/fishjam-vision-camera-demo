@@ -11,10 +11,7 @@ export function StreamSettings({ onClose }: { onClose: () => void }) {
   const [showDetails, setShowDetails] = useState(() =>
     [draft.title, ...Object.values(draft.connection)].some((value) => !value.trim()),
   );
-  const valid =
-    !!edited.title.trim() &&
-    !!edited.connection.roomName.trim() &&
-    !!edited.connection.peerName.trim();
+  const valid = !!edited.title.trim() && !!edited.connection.roomName.trim();
   return (
     <Sheet
       visible
@@ -45,12 +42,7 @@ export function StreamSettings({ onClose }: { onClose: () => void }) {
                 returnKeyType="done"
               />
             </View>
-            {(
-              [
-                ['roomName', 'Room name'],
-                ['peerName', 'Host name'],
-              ] as const
-            ).map(([field, label]) => (
+            {([['roomName', 'Room name']] as const).map(([field, label]) => (
               <View key={field} style={{ gap: 8 }}>
                 <Text style={styles.label}>{label}</Text>
                 <TextInput
@@ -96,7 +88,7 @@ export function StreamSettings({ onClose }: { onClose: () => void }) {
               </View>
             ))}
             <Notice>
-              Settings are kept for this session. Use a different host name on each device.
+              Settings are kept for this session. Use the same room name on the host and viewer.
             </Notice>
           </View>
         </Collapsible>

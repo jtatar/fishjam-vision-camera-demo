@@ -1,4 +1,5 @@
-export { useCameraSource } from './useCameraSource';
+export { useCameraSource, useCameraFrameOutput } from './useCameraSource';
+export { useCaptureSession } from './useCaptureSession';
 export { useCameraZoom } from './useCameraZoom';
 export { useCameraTorch } from './useCameraTorch';
 export { useCameraControls } from './useCameraControls';

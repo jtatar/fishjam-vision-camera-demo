@@ -10,7 +10,7 @@ final class LaunchSmokeTests: XCTestCase {
     let configured = app.staticTexts["Stream connection ready"].exists
     app.buttons["Join as a viewer"].tap()
     XCTAssertTrue(app.staticTexts["Watch the stream."].waitForExistence(timeout: 10))
-    XCTAssertEqual(app.buttons["Join as viewer"].isEnabled, configured)
+    XCTAssertEqual(app.buttons["Watch livestream"].isEnabled, configured)
     XCTAssertFalse(app.otherElements["camera-preview"].exists)
     capture("ios-viewer")
     app.buttons["Back"].tap()

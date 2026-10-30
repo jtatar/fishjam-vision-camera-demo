@@ -3,10 +3,30 @@
 Copy this entire `core/` directory into your project, for example to `src/camera/core`. Import from its `index.ts` entrypoint:
 
 ```ts
-import { useCameraSource, useCameraControls, type CameraControls } from './camera/core';
+import {
+  useCameraSource,
+  useCameraFrameOutput,
+  useCaptureSession,
+  useCameraControls,
+  type CameraControls,
+} from './camera/core';
 ```
 
-The directory has no imports from the demo, no theme, no navigation and no environment variables. It contains the Fishjam frame adapter and independent zoom/torch hooks. Your screen owns permission requests, device selection, foreground/navigation state, connection to a room, and the visual controls.
+The directory has no imports from the demo, no theme, no navigation and no environment variables. It contains the Fishjam frame adapter and independent zoom/torch hooks. Your screen owns permission requests, device selection, foreground/navigation state, connection to a livestream, and the visual controls.
+
+## Upgrading from the conference example
+
+Replace the entire `core/` folder and update its callers together. The source hook's API and publishing lifecycle changed:
+
+| Previous integration                                          | Livestream integration                                                                                                                                       |
+| ------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `useCameraSource(sourceId, enabled)`                          | `useCameraSource(enabled)` returns `{ track, stream, error }`; remove the source ID.                                                                         |
+| `source.frameOutput`                                          | Call `useCameraFrameOutput(source.track)` inside each keyed camera capture.                                                                                  |
+| The source hook registers a stream through `useCustomSource`. | The parent explicitly passes `source.stream` to `useLivestreamStreamer().connect({ token, inputs: { video: source.stream } })` once the stream is available. |
+| Camera setup uses `useCamera`.                                | Use `useCaptureSession(device, previewOutput, frameOutput, active)` for the tested portrait capture configuration.                                           |
+| Conference connection and peer tracks                         | Use livestream streamer/viewer tokens and render the stream returned by `useLivestreamViewer`.                                                               |
+
+Keep `useCameraSource` mounted above the camera keyed by `device.id`. Its `enabled` argument controls ownership of the publishing track: retain it during camera switches and background pauses. Pause capture through `useCaptureSession`'s `active` argument instead. Zoom and torch hook signatures stay the same. The complete example below shows this ownership split and includes the iOS orientation and resolution fixes.
 
 ## Install and configure the native dependencies
 
@@ -49,6 +69,7 @@ Merge these settings into your existing `app.json`; retain your other permission
 ```json
 {
   "expo": {
+    "orientation": "portrait",
     "plugins": [["expo-build-properties", { "android": { "minSdkVersion": 26 } }]],
     "ios": {
       "infoPlist": {
@@ -68,57 +89,54 @@ Use `babel-preset-expo` and keep `react-native-worklets/plugin` last in the Babe
 
 ## Connect the camera to Fishjam
 
-The following component can be pasted into `src/PublishingCamera.tsx`. It expects a granted camera permission, a selected VisionCamera device, and `active` from your app's foreground and screen-focus state. Mount it inside `FishjamProvider` and `GestureHandlerRootView`. Give each simultaneous capture a distinct, stable `sourceId`.
+The following component can be pasted into `src/PublishingCamera.tsx`. It expects a granted camera permission, a selected VisionCamera device, and `active` from your app's foreground and screen-focus state. Mount it inside `FishjamProvider` and `GestureHandlerRootView`. Keep the forwarding source above the keyed camera so switching lenses retains the negotiated livestream track.
 
 ```tsx
-import { useMemo, useState, type ReactNode } from 'react';
+import { useEffect, type ReactNode } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
+import type { MediaStream } from '@fishjam-cloud/react-native-client';
 import { GestureDetector } from 'react-native-gesture-handler';
+import { NativePreviewView, usePreviewOutput, type CameraDevice } from 'react-native-vision-camera';
 import {
-  NativePreviewView,
-  useCamera,
-  usePreviewOutput,
-  type CameraDevice,
-} from 'react-native-vision-camera';
-import { useCameraSource, useCameraControls, type CameraControls } from './camera/core';
+  useCameraSource,
+  useCameraFrameOutput,
+  useCaptureSession,
+  useCameraControls,
+  type CameraControls,
+  type CameraSource,
+} from './camera/core';
 
 type PublishingCameraProps = {
   device: CameraDevice;
   active: boolean;
-  sourceId: string;
+  onStreamChange: (stream: MediaStream | null) => void;
   renderControls?: (controls: CameraControls) => ReactNode;
 };
 
 export function PublishingCamera(props: PublishingCameraProps) {
-  // A device switch starts a fresh source and control session.
-  return <CameraSession key={props.device.id} {...props} />;
+  const source = useCameraSource(true);
+  const { onStreamChange } = props;
+  useEffect(() => {
+    onStreamChange(source.stream ?? null);
+    return () => onStreamChange(null);
+  }, [source.stream, onStreamChange]);
+  return <CameraSession key={props.device.id} source={source} {...props} />;
 }
 
-function CameraSession({ device, active, sourceId, renderControls }: PublishingCameraProps) {
-  const [running, setRunning] = useState(false);
-  const [captureError, setCaptureError] = useState<string | null>(null);
-  const { frameOutput, stream, error: sourceError } = useCameraSource(sourceId, active);
+function CameraSession({
+  device,
+  active,
+  source,
+  renderControls,
+}: PublishingCameraProps & { source: CameraSource }) {
+  const { stream, error: sourceError } = source;
+  const frameOutput = useCameraFrameOutput(source.track);
   const previewOutput = usePreviewOutput();
-  const outputs = useMemo(() => [previewOutput, frameOutput], [previewOutput, frameOutput]);
-
-  const camera = useCamera({
-    device,
-    isActive: active && !!stream,
-    outputs,
-    orientationSource: 'interface',
-    mirrorMode: 'off',
-    onStarted: () => {
-      setRunning(true);
-      setCaptureError(null);
-    },
-    onStopped: () => setRunning(false),
-    onError: (cause) => {
-      setRunning(false);
-      setCaptureError(cause.message);
-    },
-    onInterruptionStarted: () => setRunning(false),
-    onInterruptionEnded: () => setRunning(true),
-  });
+  const {
+    camera,
+    running,
+    error: captureError,
+  } = useCaptureSession(device, previewOutput, frameOutput, active && !!stream);
   const controls = useCameraControls(camera, active && running, device);
   const error = sourceError ?? captureError ?? controls.error;
 
@@ -164,7 +182,9 @@ export function CameraProviders({ fishjamId, children }: PropsWithChildren<{ fis
 
 Use VisionCamera's `useCameraPermission` and `useCameraDevice` in the parent. Render `PublishingCamera` only after permission is granted and a device exists. Set `active` to false when the app backgrounds or the camera screen loses focus; unmount when capture ends. Do not remount it on every zoom or torch change.
 
-Joining/leaving the room remains an explicit app action using Fishjam's `useConnection().joinRoom({ peerToken })` and `leaveRoom()`. Obtain the peer token from your backend. `useCameraSource` registers its stream before joining and Fishjam publishes it when connected. Receivers read `peer.customVideoTracks`, not just `peer.cameraTrack`. See [Fishjam's custom source guide](https://fishjam.swmansion.com/docs/0.30.0/how-to/client/custom-sources).
+Starting/stopping the livestream remains an explicit app action. Store the stream from `onStreamChange` in the parent and pass it to `useLivestreamStreamer().connect({ token: streamerToken, inputs: { video: stream } })`; use `disconnect()` to end it. Obtain a streamer token for a room of type `livestream` from your backend or the Sandbox `/livestream` endpoint. A viewer uses a separate viewer token with `useLivestreamViewer().connect({ token: viewerToken })` and renders the returned `stream` in `RTCView`. See [Fishjam's livestream tutorial](https://fishjam.swmansion.com/docs/tutorials/livestreaming) and this demo's [`useLivestreamSession`](../../room/useLivestreamSession.ts) for cancellation and connection errors.
+
+For microphone support, include a live audio track in the initial `inputs.audio`; muting should disable that track rather than stop/recreate it. WHIP cannot add a new audio track to an already negotiated video-only session. The demo retains a muted track from connection time and releases it on exit.
 
 ## Add your controls without leaving the UI runtime
 
@@ -230,16 +250,18 @@ The surrounding demo's `ZoomControls`, `TorchControls`, `CameraControlButton` an
 
 ## Public API and state ownership
 
-| Export                                                        | Responsibility                                                                              |
-| ------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
-| `useCameraSource(sourceId, enabled)`                          | Own the Fishjam forwarding track, register its stream, return the VisionCamera frame output |
-| `useCameraZoom(camera, active)`                               | Pinch gesture, live zoom, UI actions, camera limits and errors                              |
-| `useCameraTorch(camera, active, device)`                      | Desired torch strength, confirmed hardware state, supported levels and serialized commands  |
-| `useCameraControls(camera, active, device)`                   | Compose zoom and torch for one running camera; expose `ready` and a combined error          |
-| `CameraSource`, `CameraZoom`, `CameraTorch`, `CameraControls` | Result types for the hooks                                                                  |
-| `TorchDevice`, `TorchLevel`                                   | Torch capabilities and the strength/label entries                                           |
+| Export                                                        | Responsibility                                                                             |
+| ------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| `useCameraSource(enabled)`                                    | Own the Fishjam forwarding track and expose its stream across camera switches              |
+| `useCameraFrameOutput(track)`                                 | Create a native frame output for one camera session, forwarding to the stable track        |
+| `useCaptureSession(device, preview, frames, active)`          | Configure portrait capture for the frame output and serialize native camera teardown       |
+| `useCameraZoom(camera, active)`                               | Pinch gesture, live zoom, UI actions, camera limits and errors                             |
+| `useCameraTorch(camera, active, device)`                      | Desired torch strength, confirmed hardware state, supported levels and serialized commands |
+| `useCameraControls(camera, active, device)`                   | Compose zoom and torch for one running camera; expose `ready` and a combined error         |
+| `CameraSource`, `CameraZoom`, `CameraTorch`, `CameraControls` | Result types for the hooks                                                                 |
+| `TorchDevice`, `TorchLevel`                                   | Torch capabilities and the strength/label entries                                          |
 
-Use the zoom/torch hooks separately if you only need one control. They require no Fishjam provider. `useCameraSource` requires the provider; it does not request permissions or join a room.
+Use the zoom/torch hooks separately if you only need one control. They require no Fishjam provider. `useCameraSource` also works without the provider; it only forwards frames and does not request permissions or connect to Fishjam. The livestream connection hooks require `FishjamProvider`.
 
 | Value                    | Runtime         | Use                                                   |
 | ------------------------ | --------------- | ----------------------------------------------------- |
@@ -251,16 +273,17 @@ Use the zoom/torch hooks separately if you only need one control. They require n
 
 The frame callback runs on a separate camera worklet runtime. Zoom gestures and animated feedback run on UI. Discrete torch requests cross to RN and are serialized; confirmation cannot overwrite a newer selection. Keep lifecycle and room actions in React.
 
-The example prefers 1280×720 capture and caps zoom at 10× within the device limits. If your product needs different defaults, change `TARGET_RESOLUTION` in `useCameraSource.ts` and the cap in `useCameraZoom.ts`; the camera chooses the actual supported resolution.
+The example prefers 1280×720 capture at 30 fps and caps zoom at 10× within the device limits. `useCaptureSession` selects the format from the frame output's target, avoiding the screen-sized preview constraint added by VisionCamera's `useCamera` hook. That default constraint selected oversized formats on the tested iPhone 13. If your product needs different defaults, change `TARGET_RESOLUTION` in `useCameraSource.ts`, the constraints in `useCaptureSession.ts` and the cap in `useCameraZoom.ts`; verify actual received resolution on hardware. The supplied session is portrait-only, matching the app's orientation setting.
 
 ## Keep these lifecycle details when copying
 
 Copy the whole folder, including the internal queue, rotation mapping and managed output. They are part of the working integration:
 
 - Every frame and native buffer reference is released in `finally`.
+- Camera-session teardown drains before configuring a replacement; each session owns its frame output, while the publishing track survives lens switches.
 - Torch requests coalesce; teardown waits for an in-flight request and turns the light off. A resumed session waits for that cleanup.
 - Old zoom and torch completions cannot replace a newer UI request.
 - `useManagedFrameOutput` detaches the frame callback and retains its runtime while queued frames drain. This addresses an Android teardown crash observed with VisionCamera `5.0.10`, Worklets `0.10.1` and CameraX `1.7.0-alpha01`.
-- `frameRotation` converts pixel orientation into WebRTC's clockwise correction (`left` → 90°, `right` → 270°). iOS needs the inverse of its pixel rotation; the pinned Android version's CameraX labels resolve to the same correction. Keep this conversion in the source rather than applying a viewer-only transform.
+- `frameRotation` converts pixel orientation into WebRTC's clockwise correction (`left` → 90°, `right` → 270°). iOS requests physical buffer rotation from AVFoundation, delivering upright buffers with zero rotation metadata. This avoids retained I420 rotation buffers observed with the pinned SDK's WHIP path. Android keeps metadata rotation. Keep this handling in the source rather than applying a viewer-only transform.
 
 Review the last two compatibility helpers when upgrading those packages. Before shipping a copied integration, exercise capture, pinch, torch, camera switching, background/resume and unmount on the physical devices you support. An emulator can check command flow but cannot verify flashlight output.

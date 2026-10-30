@@ -6,15 +6,18 @@ const mockJoin = jest.fn();
 const mockLeave = jest.fn();
 let mockReady = true;
 let mockSession = {
-  peerStatus: 'disconnected',
-  reconnectionStatus: 'idle',
+  connected: false,
   busy: false,
   error: null as string | null,
 };
-jest.mock('../src/room/useRoomSession', () => ({
-  useRoomSession: () => ({ ...mockSession, join: mockJoin, leave: mockLeave }),
+jest.mock('../src/room/useLivestreamSession', () => ({
+  useLivestreamSession: () => ({
+    ...mockSession,
+    join: mockJoin,
+    leave: mockLeave,
+    microphone: { warning: null },
+  }),
 }));
-jest.mock('@fishjam-cloud/react-native-client', () => ({ usePeers: () => ({ remotePeers: [] }) }));
 jest.mock('expo-router', () => ({ useFocusEffect: jest.fn() }));
 jest.mock('../src/camera/CameraPublisher', () => ({
   CameraPublisher: ({ header, footer, onReadyChange }: any) => {
@@ -41,7 +44,6 @@ const config = {
   fishjamId: 'test-id',
   sandboxUrl: 'https://example.com/token',
   roomName: 'showcase',
-  peerName: 'host',
 };
 const onBack = jest.fn();
 function open(connection = config) {
@@ -52,8 +54,7 @@ function open(connection = config) {
 
 beforeEach(() => {
   mockSession = {
-    peerStatus: 'disconnected',
-    reconnectionStatus: 'idle',
+    connected: false,
     busy: false,
     error: null,
   };
@@ -76,7 +77,7 @@ test('publishing waits for a ready camera', () => {
   expect(mockJoin).not.toHaveBeenCalled();
 });
 
-test('ready preview can start a real room join', () => {
+test('ready preview can start a livestream', () => {
   open();
   fireEvent.press(screen.getByRole('button', { name: 'Go live' }));
   expect(mockJoin).toHaveBeenCalledTimes(1);
@@ -92,7 +93,7 @@ test('connecting is cancellable and is not displayed as live', () => {
 });
 
 test('ending a live stream requires the destructive confirmation', () => {
-  mockSession.peerStatus = 'connected';
+  mockSession.connected = true;
   const alert = jest.spyOn(Alert, 'alert').mockImplementation(() => {});
   open();
   expect(screen.getByTestId('stream-status')).toHaveTextContent('LIVE');
@@ -106,11 +107,11 @@ test('ending a live stream requires the destructive confirmation', () => {
   alert.mockRestore();
 });
 
-test('closing during reconnection also confirms ending the session', () => {
-  mockSession.reconnectionStatus = 'reconnecting';
+test('closing a live publisher confirms ending the session', () => {
+  mockSession.connected = true;
   const alert = jest.spyOn(Alert, 'alert').mockImplementation(() => {});
   open();
-  expect(screen.getByTestId('stream-status')).toHaveTextContent('RECONNECTING');
+  expect(screen.getByTestId('stream-status')).toHaveTextContent('LIVE');
   fireEvent.press(screen.getByRole('button', { name: 'Back' }));
   expect(onBack).not.toHaveBeenCalled();
   act(() => alert.mock.calls[0][2]![1].onPress!());

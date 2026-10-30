@@ -1,14 +1,14 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Alert, BackHandler, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { usePeers } from '@fishjam-cloud/react-native-client';
+import { type MediaStream } from '@fishjam-cloud/react-native-client';
 import { useFocusEffect } from 'expo-router';
 import { CameraPublisher } from '../camera/CameraPublisher';
 import { type RoomConfig } from '../config';
 import { Button, Card, Notice, colors, styles } from '../ui';
 import { Icon, IconButton } from '../studio/controls';
 import { StreamSettings } from '../studio/StreamSettings';
-import { useRoomSession } from './useRoomSession';
+import { useLivestreamSession } from './useLivestreamSession';
 import { RemoteStreams } from './RemoteStreams';
 import { MicrophoneButton } from './MicrophoneButton';
 
@@ -23,24 +23,17 @@ export function RoomScreen({
   mode: 'camera' | 'viewer';
   onBack: () => void;
 }) {
-  const session = useRoomSession(config);
-  const { remotePeers } = usePeers();
+  const [video, setVideo] = useState<MediaStream | null>(null);
+  const session = useLivestreamSession(config, mode, video);
   const [settings, setSettings] = useState(false);
   const [ready, setReady] = useState(false);
-  const connected = session.peerStatus === 'connected';
-  const reconnecting = session.reconnectionStatus === 'reconnecting';
-  const joining = session.busy || session.peerStatus === 'connecting';
+  const connected = session.connected;
+  const joining = session.busy;
   const configured = !!config.fishjamId.trim() && !!config.sandboxUrl.trim();
-  const error =
-    session.error ??
-    (session.reconnectionStatus === 'error'
-      ? 'Connection lost. End this stream and try again.'
-      : session.peerStatus === 'error'
-        ? 'Couldn’t connect. Check your stream details and try again.'
-        : null);
+  const error = session.error;
   const leave = session.leave;
   const close = useCallback(() => {
-    if (mode === 'camera' && (connected || reconnecting))
+    if (mode === 'camera' && connected)
       Alert.alert(
         'End your live stream?',
         'Your audience will no longer receive your camera or microphone.',
@@ -60,7 +53,7 @@ export function RoomScreen({
       leave();
       onBack();
     }
-  }, [connected, reconnecting, leave, onBack, mode]);
+  }, [connected, leave, onBack, mode]);
   useFocusEffect(
     useCallback(() => {
       const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
@@ -72,7 +65,7 @@ export function RoomScreen({
   );
 
   function primaryAction() {
-    if (connected || reconnecting) {
+    if (connected) {
       Alert.alert('End your live stream?', 'You can start another stream from the preview.', [
         { text: 'Keep streaming', style: 'cancel' },
         { text: 'End stream', style: 'destructive', onPress: leave },
@@ -81,38 +74,29 @@ export function RoomScreen({
     else if (!configured) setSettings(true);
     else void session.join();
   }
-  const buttonLabel =
-    connected || reconnecting
-      ? 'End live'
-      : joining
-        ? 'Cancel connecting'
-        : !configured
-          ? 'Set up stream'
-          : 'Go live';
+  const buttonLabel = connected
+    ? 'End live'
+    : joining
+      ? 'Cancel connecting'
+      : !configured
+        ? 'Set up stream'
+        : 'Go live';
   const header = (
     <View style={local.header}>
       <IconButton icon="close" label="Back" onPress={close} />
       <View style={local.statusGroup}>
-        <View style={[local.status, connected && !reconnecting && local.live]}>
-          <View
-            style={[local.statusDot, connected && !reconnecting && { backgroundColor: '#FFF' }]}
-          />
+        <View style={[local.status, connected && local.live]}>
+          <View style={[local.statusDot, connected && { backgroundColor: '#FFF' }]} />
           <Text testID="stream-status" style={local.statusText}>
-            {reconnecting
-              ? 'RECONNECTING'
-              : connected
-                ? 'LIVE'
-                : joining
-                  ? 'CONNECTING'
-                  : 'PREVIEW'}
+            {connected ? 'LIVE' : joining ? 'CONNECTING' : 'PREVIEW'}
           </Text>
         </View>
-        {(connected || reconnecting) && <LiveTimer />}
+        {connected && <LiveTimer />}
       </View>
       <IconButton
         icon="options-outline"
         label="Stream details"
-        disabled={connected || joining || reconnecting}
+        disabled={connected || joining}
         onPress={() => setSettings(true)}
       />
     </View>
@@ -122,7 +106,7 @@ export function RoomScreen({
       <Pressable
         accessibilityRole="button"
         accessibilityLabel="Edit stream details"
-        disabled={connected || joining || reconnecting}
+        disabled={connected || joining}
         onPress={() => setSettings(true)}
         style={local.streamTitle}
       >
@@ -132,41 +116,38 @@ export function RoomScreen({
             {title}
           </Text>
         </View>
-        {!connected && !joining && !reconnecting && (
-          <Icon name="create-outline" size={19} color="#C8D0D4" />
-        )}
+        {!connected && !joining && <Icon name="create-outline" size={19} color="#C8D0D4" />}
       </Pressable>
       {error && <Notice error>{error}</Notice>}
+      {session.microphone.warning && <Notice>{session.microphone.warning}</Notice>}
       <Pressable
         accessibilityRole="button"
         accessibilityLabel={buttonLabel}
         accessibilityState={{
-          disabled: configured && !ready && !connected && !joining && !reconnecting,
+          disabled: configured && !ready && !connected && !joining,
         }}
-        disabled={configured && !ready && !connected && !joining && !reconnecting}
+        disabled={configured && !ready && !connected && !joining}
         onPress={primaryAction}
         style={({ pressed }) => [
           local.goLive,
-          (connected || reconnecting) && local.endLive,
-          configured && !ready && !connected && !joining && !reconnecting && styles.disabled,
+          connected && local.endLive,
+          configured && !ready && !connected && !joining && styles.disabled,
           pressed && { opacity: 0.75 },
         ]}
       >
         <Icon
-          name={connected || reconnecting ? 'stop-circle-outline' : joining ? 'close' : 'radio'}
+          name={connected ? 'stop-circle-outline' : joining ? 'close' : 'radio'}
           color="#FFF"
           size={22}
         />
         <Text style={local.goLiveText}>{buttonLabel}</Text>
       </Pressable>
       <Text style={local.footerHint}>
-        {reconnecting
-          ? 'Trying to restore your connection…'
-          : connected
-            ? `${remotePeers.length} ${remotePeers.length === 1 ? 'participant' : 'participants'} connected · You control your mic`
-            : configured
-              ? 'Your mic starts muted. Enable it when you’re live.'
-              : 'Only you can see this preview'}
+        {connected
+          ? 'Broadcasting live · You control your mic'
+          : configured
+            ? 'Your mic starts muted. Enable it when you’re live.'
+            : 'Only you can see this preview'}
       </Text>
     </>
   );
@@ -190,13 +171,15 @@ export function RoomScreen({
             <Text style={styles.heading}>{config.roomName}</Text>
             <Notice>
               {connected
-                ? 'Connected to the room'
-                : 'Join the same room as your host to watch their stream.'}
+                ? 'Connected to the livestream'
+                : 'Use the same room name as your host. Start watching after they go live.'}
             </Notice>
             {!configured && <Notice>Add a Fishjam connection in stream details to watch.</Notice>}
             <Button
               primary
-              label={connected ? 'Leave room' : joining ? 'Cancel joining' : 'Join as viewer'}
+              label={
+                connected ? 'Stop watching' : joining ? 'Cancel connecting' : 'Watch livestream'
+              }
               disabled={!configured}
               onPress={() => {
                 if (connected || joining) leave();
@@ -205,7 +188,7 @@ export function RoomScreen({
             />
             {error && <Notice error>{error}</Notice>}
           </Card>
-          <RemoteStreams />
+          <RemoteStreams stream={session.stream} name={config.roomName} />
         </ScrollView>
         {settings && <StreamSettings onClose={() => setSettings(false)} />}
       </SafeAreaView>
@@ -216,8 +199,11 @@ export function RoomScreen({
       <CameraPublisher
         header={header}
         footer={footer}
-        microphone={<MicrophoneButton connected={connected} compact />}
+        microphone={
+          <MicrophoneButton connected={connected} microphone={session.microphone} compact />
+        }
         onReadyChange={setReady}
+        onStreamChange={setVideo}
       />
       {settings && <StreamSettings onClose={() => setSettings(false)} />}
     </>

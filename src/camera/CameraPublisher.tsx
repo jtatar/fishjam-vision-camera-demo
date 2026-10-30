@@ -1,17 +1,19 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { Linking, StyleSheet, Text, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useDerivedValue } from 'react-native-reanimated';
 import { scheduleOnRN } from 'react-native-worklets';
 import {
-  useCamera,
   useCameraDevice,
   useCameraPermission,
   usePreviewOutput,
   type CameraDevice,
 } from 'react-native-vision-camera';
-import { useCameraControls, useCameraSource } from './core';
+import { useCameraControls, useCameraSource, useCameraFrameOutput } from './core';
+import type { CameraSource } from './core/useCameraSource';
+import { useCaptureSession } from './core/useCaptureSession';
+import type { MediaStream } from '@fishjam-cloud/react-native-client';
 import { ZoomControls } from './ZoomControls';
 import { TorchControls } from './TorchControls';
 import { CameraControlButton } from './CameraControlButton';
@@ -22,13 +24,12 @@ import { Button, Card, Notice, colors, styles } from '../ui';
 import { Icon, IconButton } from '../studio/controls';
 import { errorMessage } from '../errors';
 
-export const CAMERA_SOURCE_ID = 'controlled-camera';
-
 type CameraPublisherProps = {
   header: ReactNode;
   footer: ReactNode;
   microphone: ReactNode;
   onReadyChange: (ready: boolean) => void;
+  onStreamChange: (stream: MediaStream | null) => void;
 };
 
 type CameraUnavailableProps = Pick<CameraPublisherProps, 'header' | 'footer'> & {
@@ -39,6 +40,7 @@ type CameraUnavailableProps = Pick<CameraPublisherProps, 'header' | 'footer'> & 
 };
 
 type CameraCaptureProps = CameraPublisherProps & {
+  source: CameraSource;
   device: CameraDevice;
   active: boolean;
   canSwitch: boolean;
@@ -51,6 +53,12 @@ export function CameraPublisher(props: CameraPublisherProps) {
   const device = useCameraDevice(position);
   const alternateDevice = useCameraDevice(position === 'back' ? 'front' : 'back');
   const active = useForeground();
+  const source = useCameraSource(permission.hasPermission && !!device);
+  const { onStreamChange } = props;
+  useEffect(() => {
+    onStreamChange(source.stream ?? null);
+    return () => onStreamChange(null);
+  }, [source.stream, onStreamChange]);
   const switchCamera = () => setPosition((current) => (current === 'back' ? 'front' : 'back'));
 
   if (!permission.hasPermission || !device) {
@@ -73,6 +81,7 @@ export function CameraPublisher(props: CameraPublisherProps) {
       active={active}
       canSwitch={!!alternateDevice}
       onSwitch={switchCamera}
+      source={source}
       {...props}
     />
   );
@@ -140,9 +149,8 @@ function CameraCapture({
   footer,
   microphone,
   onReadyChange,
+  source,
 }: CameraCaptureProps) {
-  const [isRunning, setIsRunning] = useState(false);
-  const [captureError, setCaptureError] = useState<string | null>(null);
   const [isTorchPanelVisible, setIsTorchPanelVisible] = useState(false);
   const [isStreamCheckVisible, setIsStreamCheckVisible] = useState(false);
 
@@ -157,27 +165,14 @@ function CameraCapture({
   }, []);
   const insets = useSafeAreaInsets();
 
-  const { frameOutput, stream, error: sourceError } = useCameraSource(CAMERA_SOURCE_ID, active);
+  const { stream, error: sourceError } = source;
+  const frameOutput = useCameraFrameOutput(source.track);
   const previewOutput = usePreviewOutput();
-  const outputs = useMemo(() => [previewOutput, frameOutput], [previewOutput, frameOutput]);
-  const camera = useCamera({
-    device,
-    isActive: active && !!stream,
-    outputs,
-    orientationSource: 'interface',
-    mirrorMode: 'off',
-    onStarted: () => {
-      setIsRunning(true);
-      setCaptureError(null);
-    },
-    onStopped: () => setIsRunning(false),
-    onError: (cause) => {
-      setIsRunning(false);
-      setCaptureError(errorMessage(cause));
-    },
-    onInterruptionStarted: () => setIsRunning(false),
-    onInterruptionEnded: () => setIsRunning(true),
-  });
+  const {
+    camera,
+    running: isRunning,
+    error: captureError,
+  } = useCaptureSession(device, previewOutput, frameOutput, active && !!stream);
   const controls = useCameraControls(camera, active && isRunning, device);
   const { desiredTorchStrength } = controls;
   const torchSelected = useDerivedValue(() => desiredTorchStrength.get() > 0);

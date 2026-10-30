@@ -116,7 +116,7 @@ final class DeviceCameraTests: XCTestCase {
     tap("Close stream check")
     tap("Back")
     tap("Join as a viewer")
-    XCTAssertEqual(app.buttons["Join as viewer"].isEnabled, configured)
+    XCTAssertEqual(app.buttons["Watch livestream"].isEnabled, configured)
     XCTAssertFalse(app.otherElements["camera-preview"].exists)
     capture("iphone-studio-viewer")
     tap("Back")

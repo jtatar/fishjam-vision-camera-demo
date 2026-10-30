@@ -200,7 +200,7 @@ public class CameraSmokeTest {
 
     button("Back").click();
     button("Join as a viewer").click();
-    assertEquals(configured, button("Join as viewer").isEnabled());
+    assertEquals(configured, button("Watch livestream").isEnabled());
     assertFalse(device.hasObject(By.res("camera-preview")));
     screenshot("android-viewer");
     button("Back").click();

@@ -1,37 +1,25 @@
-import { useCallback, useEffect, useState } from 'react';
-import { useCustomSource } from '@fishjam-cloud/react-native-client';
+import { useCallback } from 'react';
+import { Platform } from 'react-native';
 import { useManagedForwardTrack } from '@fishjam-cloud/react-native-custom-video-source';
-import { forwardFrame } from '@fishjam-cloud/react-native-webrtc';
+import { forwardFrame, type ForwardTrack } from '@fishjam-cloud/react-native-webrtc';
 import type { Frame } from 'react-native-vision-camera';
 import { useManagedFrameOutput } from './useManagedFrameOutput';
 import { frameRotation } from './frameRotation';
-import { errorMessage } from './errors';
 
 const TARGET_RESOLUTION = { width: 1280, height: 720 };
 
 /**
- * Register VisionCamera frames as a Fishjam custom video source.
- * Mount inside FishjamProvider and keep sourceId unique and stable per capture.
- * Pass false when capture is paused; this releases the forwarding track.
+ * Own the managed stream for livestream inputs.video.
+ * Keep this hook above keyed camera captures so switching cameras preserves the track.
+ * Pass false to release the forwarding track.
  */
-export function useCameraSource(sourceId: string, enabled: boolean) {
+export function useCameraSource(enabled: boolean) {
   const { track, stream, error } = useManagedForwardTrack(enabled);
-  const { setStream } = useCustomSource(sourceId);
-  const [publishError, setPublishError] = useState<string | null>(null);
+  return { track, stream, error: error?.message ?? null };
+}
 
-  useEffect(() => {
-    if (!stream) return;
-    let disposed = false;
-    setPublishError(null);
-    void setStream(stream).catch((cause) => {
-      if (!disposed) setPublishError(errorMessage(cause));
-    });
-    return () => {
-      disposed = true;
-      void setStream(null).catch((cause) => console.warn('Camera source cleanup failed', cause));
-    };
-  }, [stream, setStream]);
-
+/** Each native camera session needs its own output, targeting the shared publishing track. */
+export function useCameraFrameOutput(track: ForwardTrack | null) {
   const onFrame = useCallback(
     (frame: Frame) => {
       'worklet';
@@ -55,14 +43,15 @@ export function useCameraSource(sourceId: string, enabled: boolean) {
     [track],
   );
 
-  const frameOutput = useManagedFrameOutput({
+  return useManagedFrameOutput({
     targetResolution: TARGET_RESOLUTION,
     pixelFormat: 'native',
     dropFramesWhileBusy: true,
+    // WHIP applies rotation in WebRTC on iOS. Its I420 rotation path retains
+    // full frames in this SDK version; orient buffers in AVFoundation instead.
+    enablePhysicalBufferRotation: Platform.OS === 'ios',
     onFrame,
   });
-
-  return { frameOutput, stream, error: error?.message ?? publishError };
 }
 
 export type CameraSource = ReturnType<typeof useCameraSource>;

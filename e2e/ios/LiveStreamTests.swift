@@ -7,13 +7,15 @@ final class LiveStreamTests: XCTestCase {
     continueAfterFailure = false
     app.launch()
     tap("Open studio")
+    allowMediaIfNeeded()
     let live = app.buttons["Go live"]
     XCTAssertTrue(live.waitForExistence(timeout: 20), "Configure .env.local before building.")
     wait(for: NSPredicate(format: "enabled == true"), on: live)
     live.tap()
+    allowMediaIfNeeded()
     wait(for: NSPredicate(format: "label == 'LIVE'"), on: app.staticTexts["stream-status"])
-    let viewer = app.staticTexts.matching(NSPredicate(format: "label CONTAINS '1 participant connected'")).firstMatch
-    XCTAssertTrue(viewer.waitForExistence(timeout: 60), "Join the same room on the second device.")
+    // WHIP has no conference peer list. Verify reception on the viewer device.
+    XCTAssertTrue(app.staticTexts["Broadcasting live · You control your mic"].exists)
 
     stage("cloud-1x-torch-off")
     tap("2×")
@@ -34,6 +36,40 @@ final class LiveStreamTests: XCTestCase {
     XCTAssertTrue(app.buttons["Torch off"].waitForExistence(timeout: 10))
     tap("Lighting")
     stage("cloud-final-1x-torch-off")
+
+    tap("Enable microphone")
+    XCTAssertTrue(app.buttons["Mute microphone"].exists)
+    stage("cloud-microphone-enabled")
+    tap("Mute microphone")
+    XCTAssertTrue(app.buttons["Enable microphone"].exists)
+
+    tap("Switch camera")
+    XCTAssertTrue(app.buttons["Torch unavailable"].waitForExistence(timeout: 10))
+    wait(for: NSPredicate(format: "enabled == true"), on: app.buttons["1×"])
+    stage("cloud-front-camera")
+    tap("Switch camera")
+    wait(for: NSPredicate(format: "enabled == true"), on: app.buttons["1×"])
+    stage("cloud-rear-camera")
+
+    tap("Enable microphone")
+    XCUIDevice.shared.press(.home)
+    RunLoop.current.run(until: Date().addingTimeInterval(2))
+    app.activate()
+    wait(for: NSPredicate(format: "enabled == true"), on: app.buttons["1×"])
+    XCTAssertTrue(app.buttons["Enable microphone"].exists, "Returning from the background must leave audio muted")
+    stage("cloud-resumed")
+
+    tap("End live")
+    tap("End stream")
+    wait(for: NSPredicate(format: "label == 'PREVIEW'"), on: app.staticTexts["stream-status"])
+  }
+
+  private func allowMediaIfNeeded() {
+    let alert = XCUIApplication(bundleIdentifier: "com.apple.springboard").alerts.firstMatch
+    if alert.waitForExistence(timeout: 3) {
+      let allow = alert.buttons.matching(NSPredicate(format: "label IN {'Allow', 'OK'}")).firstMatch
+      if allow.exists { allow.tap() }
+    }
   }
 
   private func stage(_ name: String) {

@@ -21,12 +21,24 @@ Fill in the Fishjam ID and Sandbox API URL from your dashboard:
 ```dotenv
 EXPO_PUBLIC_FISHJAM_ID=
 EXPO_PUBLIC_FISHJAM_SANDBOX_URL=
-EXPO_PUBLIC_ROOM_NAME=camera-controls
+EXPO_PUBLIC_ROOM_NAME=camera-controls-live
 ```
 
 Restart Metro after changing values. A standalone Release app bundles them at build time, so rebuild it to change defaults. Alternatively, enter settings through **Stream details**. Runtime settings are held in memory.
 
-`EXPO_PUBLIC_*` values are visible in the application bundle. Keep management credentials on your backend. For production, replace [`requestPeerToken`](../src/config.ts) with a call to an authenticated backend returning a peer-scoped token.
+`EXPO_PUBLIC_*` values are visible in the application bundle. Keep management credentials on your backend. For production, replace [`requestLivestreamToken`](../src/config.ts) with a call to an authenticated backend. Create a room with `roomType: 'livestream'`, then use `createLivestreamStreamerToken` and `createLivestreamViewerToken` for the respective roles. See [Fishjam’s livestreaming tutorial](https://fishjam.swmansion.com/docs/tutorials/livestreaming).
+
+### Migrating conference configuration
+
+| Setting                           | Migration                                                                                                                           |
+| --------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `EXPO_PUBLIC_FISHJAM_ID`          | Keep the same project's Fishjam ID.                                                                                                 |
+| `EXPO_PUBLIC_FISHJAM_SANDBOX_URL` | Keep the same Sandbox base URL; do not append `/livestream` yourself.                                                               |
+| `EXPO_PUBLIC_ROOM_NAME`           | Use a fresh name if the existing name belongs to a conference, and match it on both devices. The default is `camera-controls-live`. |
+
+Existing conference rooms cannot become livestreams. Update the room name in existing `.env.local` files or **Stream details** as needed. A 409 response reports a room-type conflict. The old peer-name setting is no longer used.
+
+The app chooses the room type through its API calls; there is no environment flag or UI toggle for it. [`requestLivestreamToken`](../src/config.ts) appends `/livestream?roomName=…&public=false` for the publisher and `/{roomName}/livestream-viewer-token` for the viewer. These return separate streamer and viewer tokens. A production backend must likewise create a `livestream` room and issue the appropriate token for each role.
 
 ## Common commands
 
@@ -62,24 +74,24 @@ adb -s <device-serial> install -r android/app/build/outputs/apk/release/app-rele
 
 ## Camera and room behavior
 
-- Camera switching resets zoom and torch. Backgrounding pauses capture, releases its source, and turns the torch off.
+- Camera switching resets zoom and torch. Backgrounding pauses capture, mutes audio, and turns the torch off. The forwarding track stays alive so camera switching and foreground resume retain the negotiated livestream input.
 - Leaving the camera screen releases capture. Leaving only the Fishjam room keeps the local preview open.
-- The microphone starts muted and can be enabled after joining. The viewer requests neither camera nor microphone permission.
-- Both devices need matching Fishjam settings and room names, with different participant names.
-- The example uses a real-time WebRTC conference room. It does not create an HLS broadcast or a server-side catalogue of streams.
+- Go live requests microphone access to negotiate an initially muted audio track; the mic button enables it once live. Denying access allows a video-only stream. Grant access in Settings and restart the stream to add audio. The viewer requests neither camera nor microphone permission.
+- Both devices need matching Fishjam settings and livestream room names. Start the publisher before connecting viewers.
+- The example uses a private Fishjam livestream: WHIP for publishing and WHEP for playback. It does not create an HLS broadcast or a server-side catalogue of streams.
 - The stream title is local draft metadata. Settings cannot change during a live session.
 
 ## Troubleshooting
 
-| Symptom                             | Check                                                                                                                                              |
-| ----------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Camera module missing               | Use a native build; rebuild after changing native dependencies.                                                                                    |
-| Android phone absent                | Check `adb devices`, USB, and debugging authorization on the phone.                                                                                |
-| No camera in an iOS simulator       | Use a physical iPhone for camera and torch verification.                                                                                           |
-| Emulator has fixed zoom or no torch | Use **Emulated** front/rear cameras. VirtualScene capabilities differ; physical illumination needs a real phone.                                   |
-| No brightness slider                | The selected camera reports no adjustable levels; use the circular on/off control.                                                                 |
-| Viewer shows no custom camera feed  | Render `peer.customVideoTracks`, as demonstrated in `RemoteStreams`.                                                                               |
-| Room join fails                     | Check the Fishjam ID, HTTPS Sandbox API URL, room, participant name, and network. A room already created with another type needs a different name. |
-| Dark or rotated remote picture      | Compare it with the publisher's scene. Frame counts alone cannot prove correctness. See [orientation](architecture.md#orientation-and-teardown).   |
+| Symptom                             | Check                                                                                                                                            |
+| ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Camera module missing               | Use a native build; rebuild after changing native dependencies.                                                                                  |
+| Android phone absent                | Check `adb devices`, USB, and debugging authorization on the phone.                                                                              |
+| No camera in an iOS simulator       | Use a physical iPhone for camera and torch verification.                                                                                         |
+| Emulator has fixed zoom or no torch | Use **Emulated** front/rear cameras. VirtualScene capabilities differ; physical illumination needs a real phone.                                 |
+| No brightness slider                | The selected camera reports no adjustable levels; use the circular on/off control.                                                               |
+| Viewer shows no custom camera feed  | Render the stream returned by `useLivestreamViewer`, as demonstrated in `RemoteStreams`.                                                         |
+| Livestream connection fails         | Check the Fishjam ID, HTTPS Sandbox API URL, livestream name, and network. A room already created with another type needs a different name.      |
+| Dark or rotated remote picture      | Compare it with the publisher's scene. Frame counts alone cannot prove correctness. See [orientation](architecture.md#orientation-and-teardown). |
 
 [Testing](../TESTING.md) · [Reusable integration](../src/camera/core/README.md) · [Back to the example](../README.md)

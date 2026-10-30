@@ -7,7 +7,7 @@ The prepared scene is 1920×1080: **iPhone · Publisher** on the left, **Android
 ## Get both devices ready
 
 1. Connect the iPhone to the Mac by USB and leave it unlocked. Open this app on both devices.
-2. Use the same Fishjam room and different participant names. On Android, choose **Join as a viewer**, then **Join as viewer**. On the iPhone, choose **Open studio**, then **Go live**.
+2. Use the same Fishjam livestream room name. Start the iPhone publisher first. On Android, choose **Join as a viewer**, then **Watch livestream**. On the iPhone, choose **Open studio**, then **Go live**.
 3. Wait until Android shows the actual received camera picture. Tap the video or its expand button to watch fullscreen. Leave the microphone off for a silent demonstration.
 4. Aim the iPhone at a stationary object with detail or printed text. Keep the phone steady; a moderately dim scene makes the torch easier to demonstrate. Keep both apps in portrait throughout the take.
 

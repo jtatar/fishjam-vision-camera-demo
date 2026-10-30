@@ -1,42 +1,18 @@
 import { useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
-import { RTCView, usePeers } from '@fishjam-cloud/react-native-client';
+import { RTCView } from '@fishjam-cloud/react-native-client';
 import type { MediaStream } from '@fishjam-cloud/react-native-client';
 import { Icon, IconButton } from '../studio/controls';
 import { Card, Notice, styles } from '../ui';
 import { FullscreenStream } from './FullscreenStream';
 
-export function RemoteStreams() {
-  const { remotePeers } = usePeers();
-  const videos = remotePeers.flatMap((peer) =>
-    [peer.cameraTrack, ...peer.customVideoTracks]
-      .filter((track) => track?.stream)
-      .map((track) => ({ peer, track: track! })),
-  );
-
-  return (
-    <>
-      <Text style={styles.heading}>
-        In this room · {remotePeers.length}{' '}
-        {remotePeers.length === 1 ? 'participant' : 'participants'}
-      </Text>
-      {!videos.length && (
-        <Card>
-          <Notice>Your host’s video will appear here when they start streaming.</Notice>
-        </Card>
-      )}
-      {videos.map(({ peer, track }) => (
-        <RemoteStreamCard
-          key={`${peer.id}:${track.trackId}`}
-          stream={track.stream!}
-          name={
-            typeof peer.metadata?.peer?.name === 'string'
-              ? peer.metadata.peer.name
-              : 'Remote camera'
-          }
-        />
-      ))}
-    </>
+export function RemoteStreams({ stream, name }: { stream: MediaStream | null; name: string }) {
+  return stream ? (
+    <RemoteStreamCard key={stream.id} stream={stream} name={name} />
+  ) : (
+    <Card>
+      <Notice>Your host’s video will appear here when you connect to their livestream.</Notice>
+    </Card>
   );
 }
 

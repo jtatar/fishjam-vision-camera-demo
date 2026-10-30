@@ -1,11 +1,11 @@
 import { fireEvent, render, screen } from '@testing-library/react-native';
+import type { MediaStream } from '@fishjam-cloud/react-native-client';
 import { RemoteStreams } from '../src/room/RemoteStreams';
 
-let mockPeers: unknown[] = [];
+const stream = { id: 'controlled-camera-feed' } as MediaStream;
 jest.mock('@fishjam-cloud/react-native-client', () => {
   const { Text } = require('react-native');
   return {
-    usePeers: () => ({ remotePeers: mockPeers }),
     RTCView: ({ mediaStream }: { mediaStream: { id: string } }) => <Text>{mediaStream.id}</Text>,
   };
 });
@@ -25,42 +25,19 @@ jest.mock('../src/studio/controls', () => {
   };
 });
 
-function publisher() {
-  return {
-    id: 'peer',
-    metadata: { peer: { name: 'Publisher' } },
-    cameraTrack: null,
-    customVideoTracks: [{ trackId: 'custom', stream: { id: 'controlled-camera-feed' } }],
-  };
-}
-
-test('receives custom VisionCamera video as well as ordinary camera tracks', () => {
-  mockPeers = [
-    {
-      id: 'peer',
-      metadata: { peer: { name: 'Publisher' } },
-      cameraTrack: { trackId: 'camera', stream: { id: 'ordinary-feed' } },
-      customVideoTracks: [
-        { trackId: 'custom', stream: { id: 'controlled-camera-feed' } },
-        { trackId: 'pending', stream: null },
-      ],
-    },
-  ];
-  render(<RemoteStreams />);
+test('renders the WHEP stream without conference peers', () => {
+  render(<RemoteStreams stream={stream} name="Publisher" />);
   expect(screen.getByText('controlled-camera-feed')).toBeTruthy();
-  expect(screen.getByText('ordinary-feed')).toBeTruthy();
-  expect(screen.getAllByText('Publisher')).toHaveLength(2);
+  expect(screen.getByText('Publisher')).toBeTruthy();
 });
 
-test('shows the waiting state when there are no published tracks', () => {
-  mockPeers = [];
-  render(<RemoteStreams />);
+test('shows the waiting state when there is no livestream', () => {
+  render(<RemoteStreams stream={null} name="Publisher" />);
   expect(screen.getByText(/Your host’s video/)).toBeTruthy();
 });
 
 test('expands the existing custom stream and closes without duplicating its renderer', () => {
-  mockPeers = [publisher()];
-  render(<RemoteStreams />);
+  render(<RemoteStreams stream={stream} name="Publisher" />);
   fireEvent.press(screen.getByRole('button', { name: 'View Publisher fullscreen' }));
   expect(screen.getByTestId('fullscreen-stream')).toBeTruthy();
   expect(screen.getAllByText('controlled-camera-feed')).toHaveLength(1);
@@ -71,8 +48,7 @@ test('expands the existing custom stream and closes without duplicating its rend
 });
 
 test('tapping the video opens fullscreen and Android Back returns to the room', () => {
-  mockPeers = [publisher()];
-  render(<RemoteStreams />);
+  render(<RemoteStreams stream={stream} name="Publisher" />);
   fireEvent.press(screen.getByRole('button', { name: 'Open Publisher video fullscreen' }));
   fireEvent(screen.getByTestId('fullscreen-stream'), 'requestClose');
   expect(screen.queryByTestId('fullscreen-stream')).toBeNull();
@@ -80,17 +56,14 @@ test('tapping the video opens fullscreen and Android Back returns to the room', 
 });
 
 test('a removed track dismisses fullscreen and does not reopen when the publisher returns', () => {
-  mockPeers = [publisher()];
-  const { rerender } = render(<RemoteStreams />);
+  const { rerender } = render(<RemoteStreams stream={stream} name="Publisher" />);
   fireEvent.press(screen.getByRole('button', { name: 'View Publisher fullscreen' }));
 
-  mockPeers = [];
-  rerender(<RemoteStreams />);
+  rerender(<RemoteStreams stream={null} name="Publisher" />);
   expect(screen.queryByTestId('fullscreen-stream')).toBeNull();
   expect(screen.getByText(/Your host’s video/)).toBeTruthy();
 
-  mockPeers = [publisher()];
-  rerender(<RemoteStreams />);
+  rerender(<RemoteStreams stream={stream} name="Publisher" />);
   expect(screen.queryByTestId('fullscreen-stream')).toBeNull();
   expect(screen.getByText('controlled-camera-feed')).toBeTruthy();
 });

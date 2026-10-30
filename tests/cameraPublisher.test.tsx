@@ -13,6 +13,13 @@ const mockDevice = {
   minTorchStrength: 0.001,
   maxTorchStrength: 1,
 };
+const mockFrontDevice = { ...mockDevice, id: 'front', position: 'front' };
+let mockForeground = true;
+const mockSourceMount = jest.fn();
+const mockSourceUnmount = jest.fn();
+const mockFrameOutputMount = jest.fn();
+const mockFrameOutputUnmount = jest.fn();
+
 function camera() {
   return {
     zoom: 1,
@@ -26,28 +33,45 @@ function camera() {
 let mockCamera = camera();
 beforeEach(() => {
   mockCamera = camera();
+  mockForeground = true;
   mockDevice.hasTorch = true;
   mockDevice.supportsTorchStrength = true;
 });
 const mockPreviewOutput = {};
-const mockSource = { frameOutput: {}, stream: {}, error: null };
+const mockSource = { track: {}, stream: {}, error: null };
+const mockFrameOutput = {};
 const mockPreview = jest.fn(() => null);
 const mockReady = jest.fn();
+const mockStreamChange = jest.fn();
 
 jest.mock('react-native-vision-camera', () => ({
-  useCameraDevice: () => mockDevice,
+  useCameraDevice: (position: string) => (position === 'front' ? mockFrontDevice : mockDevice),
   useCameraPermission: () => ({ hasPermission: true }),
   usePreviewOutput: () => mockPreviewOutput,
-  useCamera: ({ onStarted }: any) => {
-    const React = jest.requireActual<typeof import('react')>('react');
-    const [start] = React.useState(() => onStarted);
-    React.useEffect(start, [start]);
-    return mockCamera;
-  },
   NativePreviewView: () => mockPreview(),
 }));
-jest.mock('../src/camera/core/useCameraSource', () => ({ useCameraSource: () => mockSource }));
-jest.mock('../src/useForeground', () => ({ useForeground: () => true }));
+jest.mock('../src/camera/core/useCameraSource', () => ({
+  useCameraFrameOutput: () => {
+    const React = require('react');
+    React.useEffect(() => {
+      mockFrameOutputMount();
+      return mockFrameOutputUnmount;
+    }, []);
+    return mockFrameOutput;
+  },
+  useCameraSource: () => {
+    const React = require('react');
+    React.useEffect(() => {
+      mockSourceMount();
+      return mockSourceUnmount;
+    }, []);
+    return mockSource;
+  },
+}));
+jest.mock('../src/useForeground', () => ({ useForeground: () => mockForeground }));
+jest.mock('../src/camera/core/useCaptureSession', () => ({
+  useCaptureSession: () => ({ camera: mockCamera, running: true, error: null }),
+}));
 jest.mock('../src/diagnostics/LocalReceiver', () => ({ LocalReceiver: () => null }));
 jest.mock('@expo/vector-icons/Ionicons', () => 'Icon');
 jest.mock('expo-linear-gradient', () => ({ LinearGradient: 'LinearGradient' }));
@@ -62,7 +86,13 @@ async function settleControls() {
 
 async function openCamera() {
   render(
-    <CameraPublisher header={null} footer={null} microphone={null} onReadyChange={mockReady} />,
+    <CameraPublisher
+      header={null}
+      footer={null}
+      microphone={null}
+      onReadyChange={mockReady}
+      onStreamChange={mockStreamChange}
+    />,
   );
   await settleControls();
 }
@@ -224,4 +254,17 @@ test('brightness is adjustable through assistive technology', async () => {
   );
   await settleControls();
   expect(mockCamera.setTorchMode).toHaveBeenLastCalledWith('off');
+});
+
+test('switching cameras recreates the capture output while retaining the livestream track', async () => {
+  await openCamera();
+  expect(mockStreamChange).toHaveBeenLastCalledWith(mockSource.stream);
+  const notifications = mockStreamChange.mock.calls.length;
+  fireEvent.press(screen.getByRole('button', { name: 'Switch camera' }));
+  await settleControls();
+  expect(mockSourceMount).toHaveBeenCalledTimes(1);
+  expect(mockSourceUnmount).not.toHaveBeenCalled();
+  expect(mockStreamChange).toHaveBeenCalledTimes(notifications);
+  expect(mockFrameOutputMount).toHaveBeenCalledTimes(2);
+  expect(mockFrameOutputUnmount).toHaveBeenCalledTimes(1);
 });

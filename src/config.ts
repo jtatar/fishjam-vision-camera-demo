@@ -2,20 +2,17 @@ export type RoomConfig = {
   fishjamId: string;
   sandboxUrl: string;
   roomName: string;
-  peerName: string;
 };
 
 export const initialConfig: RoomConfig = {
   fishjamId: process.env.EXPO_PUBLIC_FISHJAM_ID ?? '',
   sandboxUrl: process.env.EXPO_PUBLIC_FISHJAM_SANDBOX_URL ?? '',
-  roomName: process.env.EXPO_PUBLIC_ROOM_NAME ?? 'camera-controls',
-  peerName: `phone-${Math.random().toString(36).slice(2, 8)}`,
+  roomName: process.env.EXPO_PUBLIC_ROOM_NAME ?? 'camera-controls-live',
 };
 
 export function validateConfig(config: RoomConfig) {
   if (!config.fishjamId.trim()) throw new Error('Enter your Fishjam ID in room settings.');
-  if (!config.roomName.trim() || !config.peerName.trim())
-    throw new Error('Room and participant names are required.');
+  if (!config.roomName.trim()) throw new Error('A livestream name is required.');
   let url: URL;
   try {
     url = new URL(config.sandboxUrl.trim());
@@ -28,28 +25,41 @@ export function validateConfig(config: RoomConfig) {
   return url;
 }
 
-export async function requestPeerToken(config: RoomConfig, signal: AbortSignal) {
+// Same Sandbox endpoints as useSandbox, with cancellation and response validation.
+export async function requestLivestreamToken(
+  config: RoomConfig,
+  role: 'streamer' | 'viewer',
+  signal: AbortSignal,
+) {
   const url = validateConfig(config);
-  url.searchParams.set('roomName', config.roomName.trim());
-  url.searchParams.set('peerName', config.peerName.trim());
-  url.searchParams.set('roomType', 'conference');
+  url.search = '';
+  url.hash = '';
+  const basePath = url.pathname.replace(/\/+$/, '');
+  if (role === 'streamer') {
+    url.pathname = `${basePath}/livestream`;
+    url.searchParams.set('roomName', config.roomName.trim());
+    url.searchParams.set('public', 'false');
+  } else {
+    url.pathname = `${basePath}/${encodeURIComponent(config.roomName.trim())}/livestream-viewer-token`;
+  }
   const response = await fetch(url.toString(), { signal });
   if (!response.ok) {
     throw new Error(
       response.status === 409
         ? 'This room name already uses a different room type. Choose another name.'
-        : `Could not get a peer token (HTTP ${response.status}). Check your Sandbox API URL.`,
+        : response.status === 404 && role === 'viewer'
+          ? 'This livestream does not exist yet. Ask your host to go live first.'
+          : `Could not get a ${role} token (HTTP ${response.status}). Check your Sandbox API URL.`,
     );
   }
   const data: unknown = await response.json();
-  if (
-    !data ||
-    typeof data !== 'object' ||
-    !('peerToken' in data) ||
-    typeof data.peerToken !== 'string' ||
-    !data.peerToken
-  ) {
-    throw new Error('The Sandbox API did not return a peer token.');
+  const field = role === 'streamer' ? 'streamerToken' : 'token';
+  const token =
+    data && typeof data === 'object' && field in data
+      ? (data as Record<string, unknown>)[field]
+      : null;
+  if (typeof token !== 'string' || !token.trim()) {
+    throw new Error(`The Sandbox API did not return a ${role} token.`);
   }
-  return data.peerToken;
+  return token;
 }

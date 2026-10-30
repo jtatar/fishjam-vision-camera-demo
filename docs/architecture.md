@@ -8,8 +8,10 @@ flowchart LR
   Camera --> Preview[Native preview]
   Camera --> Frames[Frame worklet]
   Frames --> Track[Fishjam custom video track]
-  Track --> Room[Fishjam room]
-  Room --> Viewer[Remote RTCView]
+  Track --> WHIP[Livestream publisher / WHIP]
+  WHIP --> Room[Fishjam livestream infrastructure]
+  Room --> WHEP[Livestream viewer / WHEP]
+  WHEP --> Viewer[Remote RTCView]
 ```
 
 ## Publishing frames
@@ -17,13 +19,21 @@ flowchart LR
 [`useCameraSource`](../src/camera/core/useCameraSource.ts) connects VisionCamera to Fishjam through published APIs:
 
 1. `useManagedForwardTrack` owns a native track and its stream.
-2. `useCustomSource` registers the stream with Fishjam.
+2. `useLivestreamStreamer().connect` receives the managed stream as `inputs.video`, with a livestream streamer token.
 3. A frame worklet obtains the native buffer and calls `forwardFrame` with its pointer and orientation correction.
 4. Nested `finally` blocks release the buffer reference and dispose the frame, including when forwarding fails.
 
 Fishjam retains the native buffer for encoding. Pixel data is never copied into JavaScript. The app needs no custom native module, library fork, or dependency patch.
 
-The viewer must read `peer.customVideoTracks`, not only `peer.cameraTrack`. [`RemoteStreams`](../src/room/RemoteStreams.tsx) supports both. Fullscreen playback reuses the existing stream and room connection, with one renderer for the selected track. Receivers use `contain`; the local preview uses `cover`.
+[`useCaptureSession`](../src/camera/core/useCaptureSession.ts) configures the public VisionCamera session API with the frame output's 1280×720 target and 30 fps, without adding a screen-sized preview constraint. This prevents the preview from selecting oversized capture formats on iPhone. It serializes session creation, start/stop, and teardown during lens switches. Output orientation is fixed to the app's portrait interface.
+
+The viewer uses `useLivestreamViewer().connect({ token })` with a separate viewer token. Its `stream` goes directly to [`RemoteStreams`](../src/room/RemoteStreams.tsx). Fullscreen playback reuses that stream and WHEP connection, with one renderer. Receivers use `contain`; the local preview uses `cover`.
+
+[`useLivestreamSession`](../src/room/useLivestreamSession.ts) uses the Sandbox `/livestream` endpoint for private livestream creation/streamer credentials and `/{roomName}/livestream-viewer-token` for viewers. It waits for the SDK's connection state, handles its error field, and drains cancelled in-flight connections before retrying. The viewer never captures camera or microphone media. There is no conference join, peer list, or participant count.
+
+The forwarding track lives above the keyed camera capture. Each camera session creates its own native frame output with `useCameraFrameOutput(source.track)`; sharing one output across sessions can stop delivery when the old session removes it. Switching cameras resets camera controls and the capture output but keeps the video track negotiated by WHIP. Backgrounding pauses capture and mutes audio while retaining the negotiated tracks; foregrounding can resume frames without creating a new publisher. An actual transport loss ends the session and asks the user to start again.
+
+WHIP negotiates tracks when connecting. The publisher requests microphone access on **Go live** and passes a disabled audio track with the video. The microphone button toggles that track's `enabled` property, so it can unmute without renegotiation. If permission is denied, publishing proceeds without audio and explains how to enable it for a new session. Leaving or cancelling releases microphone capture; backgrounding mutes it and resume leaves it muted.
 
 ## Which runtime owns what?
 
@@ -64,7 +74,7 @@ Camera outputs stay stable across zoom and torch updates. [`CameraPreview`](../s
 
 Two helpers deserve attention when upgrading VisionCamera:
 
-- [`frameRotation`](../src/camera/core/frameRotation.ts) converts frame orientation into the clockwise correction WebRTC expects: left → 90°, right → 270°. It passes metadata rather than rotating pixels in JavaScript. The camera follows the portrait interface; local front-camera mirroring is a preview concern.
+- [`frameRotation`](../src/camera/core/frameRotation.ts) converts frame orientation into the clockwise correction WebRTC expects: left → 90°, right → 270°. On iOS, capture physically orients native buffers through AVFoundation, so upright frames need no WebRTC rotation. This avoids retained I420 rotation buffers observed in the pinned SDK's WHIP path. Android uses rotation metadata. Neither platform rotates pixels in JavaScript. The camera follows the portrait interface; local front-camera mirroring is a preview concern.
 - [`useManagedFrameOutput`](../src/camera/core/useManagedFrameOutput.ts) detaches the native callback and keeps its runtime alive while queued native work drains. Its two queue barriers address a lifetime issue observed with VisionCamera 5.0.10 / CameraX 1.7.0-alpha01 and depend on that stack's queue ordering.
 
 Keep both helpers when copying the integration. Recheck orientation, switching, background/resume, and unmount on physical devices after camera-stack upgrades. See the [testing guide](../TESTING.md).
@@ -77,6 +87,7 @@ It does not verify server signaling, authentication, SFU forwarding, or internet
 
 ## References
 
+- [Fishjam livestreaming tutorial](https://fishjam.swmansion.com/docs/tutorials/livestreaming)
 - [Fishjam VisionCamera integration](https://fishjam.swmansion.com/docs/integrations/vision-camera/stream-vision-camera)
 - [VisionCamera orientation](https://visioncamera.margelo.com/docs/orientation)
 - [Nitro worklet support](https://nitro.margelo.com/docs/guides/worklets)
